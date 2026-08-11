@@ -29,7 +29,8 @@ jobs:
           path: ~/.npm
           key: npm-${{ runner.os }}-${{ hashFiles('**/package.json') }}
           restore-keys: npm-${{ runner.os }}-
-      - name: Install dependencies
+      - name: Install (server/frontend)
+        working-directory: server/frontend
         run: npm install
       - name: lint (server/frontend)
         working-directory: server/frontend
