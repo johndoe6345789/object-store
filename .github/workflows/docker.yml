@@ -1,0 +1,134 @@
+# Builds the S3-compatible object-store backend image for both architectures
+# and publishes a single multi-arch manifest to GHCR.
+#
+# Unlike dbal's docker.yml, there is no external base image to pull and
+# retag: server/backend/Dockerfile builds Drogon from source in its own
+# builder stage, so this workflow has nothing upstream it depends on besides
+# a checkout.
+name: docker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'server/backend/**'
+      - '.github/workflows/docker.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/johndoe6345789/object-store
+
+jobs:
+  build:
+    name: image (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Context is server/: the Dockerfile COPYs backend/CMakeLists.txt,
+      # backend/src/, backend/migrations/ and backend/entrypoint.sh, all
+      # relative to that directory.
+      - name: Build image
+        env:
+          ARCH: ${{ matrix.arch }}
+          SHA: ${{ github.sha }}
+        run: |
+          docker build \
+            -f server/backend/Dockerfile \
+            -t "$IMAGE:${SHA}-${ARCH}" \
+            server
+
+      # Confirms the runtime stage actually contains what entrypoint.sh
+      # expects to run -- the binary and the migrations it applies at boot.
+      - name: Smoke test image contents
+        env:
+          ARCH: ${{ matrix.arch }}
+          SHA: ${{ github.sha }}
+        run: |
+          docker run --rm --entrypoint sh "$IMAGE:${SHA}-${ARCH}" -c '
+            set -e
+            test -x /usr/bin/s3server        || { echo "s3server binary missing"; exit 1; }
+            test -x /app/entrypoint.sh       || { echo "entrypoint.sh missing"; exit 1; }
+            test -d /app/migrations          || { echo "migrations missing"; exit 1; }
+            echo "migrations: $(ls /app/migrations | wc -l)"
+          '
+
+      - name: Report image size
+        env:
+          ARCH: ${{ matrix.arch }}
+          SHA: ${{ github.sha }}
+        run: |
+          SIZE=$(docker image inspect "$IMAGE:${SHA}-${ARCH}" --format '{{.Size}}')
+          {
+            echo "### Image (${ARCH})"
+            echo
+            echo "size: $((SIZE / 1024 / 1024)) MB"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Push
+        env:
+          ARCH: ${{ matrix.arch }}
+          SHA: ${{ github.sha }}
+        run: docker push "$IMAGE:${SHA}-${ARCH}"
+
+  manifest:
+    name: multi-arch manifest
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and push manifest
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          docker buildx imagetools create \
+            --tag "$IMAGE:latest" \
+            --tag "$IMAGE:${SHA}" \
+            "$IMAGE:${SHA}-amd64" \
+            "$IMAGE:${SHA}-arm64"
+
+      - name: Verify manifest platforms
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          docker buildx imagetools inspect "$IMAGE:${SHA}"
+          RAW=$(docker buildx imagetools inspect "$IMAGE:${SHA}" --raw)
+          for want in amd64 arm64; do
+            echo "$RAW" | grep -q "\"$want\"" \
+              || { echo "manifest is missing linux/$want"; exit 1; }
+          done
+          echo "manifest covers linux/amd64 and linux/arm64"
