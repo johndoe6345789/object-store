@@ -26,7 +26,7 @@ FROM ubuntu:24.04
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl3t64 libjsoncpp25 libc-ares2 libpq5 \
     libsqlite3-0 libbrotli1 uuid-runtime \
-    postgresql-client && \
+    postgresql-client curl && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /build/out/s3server /usr/bin/
