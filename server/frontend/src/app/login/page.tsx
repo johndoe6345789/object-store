@@ -3,7 +3,7 @@
 import {
   Box, Card, CardContent,
   Typography, Stack, Cloud,
-} from '@shared/m3';
+} from '@metabuilder/m3';
 import { LoginForm } from '@/components/organisms';
 import labels from '@/constants/ui-labels.json';
 

@@ -2,7 +2,7 @@
 
 import {
   File, Image, Code, Archive, Description,
-} from '@shared/m3';
+} from '@metabuilder/m3';
 
 /** @brief Props for FileIcon atom. */
 export interface FileIconProps {

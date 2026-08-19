@@ -3,7 +3,7 @@
 import {
   Box, Container, Typography,
   Button, CircularProgress,
-} from '@shared/m3';
+} from '@metabuilder/m3';
 import AppNavbar from './AppNavbar';
 import DashboardStats from './DashboardStats';
 import { useDashboardStats } from '@/hooks';

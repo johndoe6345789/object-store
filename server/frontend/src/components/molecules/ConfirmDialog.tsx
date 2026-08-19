@@ -3,7 +3,7 @@
 import {
   Dialog, DialogTitle, DialogContent,
   DialogActions, Button, Typography,
-} from '@shared/m3';
+} from '@metabuilder/m3';
 import labels from '@/constants/ui-labels.json';
 
 /** @brief Props for ConfirmDialog molecule. */

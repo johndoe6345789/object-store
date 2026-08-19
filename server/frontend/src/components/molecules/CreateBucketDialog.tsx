@@ -4,7 +4,7 @@ import { useState } from 'react';
 import {
   Dialog, DialogTitle, DialogContent,
   DialogActions, TextField, Button,
-} from '@shared/m3';
+} from '@metabuilder/m3';
 import labels from '@/constants/ui-labels.json';
 
 /** @brief Props for CreateBucketDialog. */

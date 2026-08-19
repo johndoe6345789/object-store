@@ -5,7 +5,7 @@ import {
   ListItemText, Typography, Box,
   OpenInNew, Home, Email,
   Storage, Archive, CloudQueue,
-} from '@shared/m3';
+} from '@metabuilder/m3';
 import siteLinks from '@/constants/site-links.json';
 
 /** @brief Icon name to component mapping. */

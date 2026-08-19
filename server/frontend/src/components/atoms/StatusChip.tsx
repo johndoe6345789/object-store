@@ -1,6 +1,6 @@
 'use client';
 
-import { Chip } from '@shared/m3';
+import { Chip } from '@metabuilder/m3';
 
 /** @brief Props for StatusChip atom. */
 export interface StatusChipProps {

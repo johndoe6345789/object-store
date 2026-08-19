@@ -3,7 +3,7 @@
 import {
   List, ListItemButton, ListItemIcon,
   ListItemText, Dashboard, ViewList,
-} from '@shared/m3';
+} from '@metabuilder/m3';
 import Link from 'next/link';
 import labels from '@/constants/ui-labels.json';
 import routes from '@/constants/routes.json';

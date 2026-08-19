@@ -2,7 +2,7 @@
 
 import {
   Container, CircularProgress, Box, Alert,
-} from '@shared/m3';
+} from '@metabuilder/m3';
 import { useRouter } from 'next/navigation';
 import AppNavbar from './AppNavbar';
 import BucketList from './BucketList';

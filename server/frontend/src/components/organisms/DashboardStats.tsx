@@ -3,7 +3,7 @@
 import {
   Card, CardContent, Typography,
   Grid, Storage, Folder, Cloud,
-} from '@shared/m3';
+} from '@metabuilder/m3';
 import { formatBytes } from '@/utils';
 import labels from '@/constants/ui-labels.json';
 

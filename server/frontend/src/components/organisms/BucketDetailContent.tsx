@@ -6,7 +6,7 @@ import {
   Container, Typography, Breadcrumbs,
   Link as M3Link, CircularProgress,
   Box, Alert,
-} from '@shared/m3';
+} from '@metabuilder/m3';
 import AppNavbar from './AppNavbar';
 import ObjectTable from './ObjectTable';
 import { useObjects } from '@/hooks';

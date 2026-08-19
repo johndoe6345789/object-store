@@ -1,6 +1,6 @@
 'use client';
 
-import { Typography } from '@shared/m3';
+import { Typography } from '@metabuilder/m3';
 import { formatBytes } from '@/utils';
 
 /** @brief Props for SizeLabel atom. */
