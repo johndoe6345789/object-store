@@ -40,7 +40,11 @@ void ObjectCtrl::getObject(const HttpRequestPtr& req,
     auto r = HttpResponse::newHttpResponse();
     r->setContentTypeString(meta["content_type"].asString());
     r->addHeader("ETag", "\"" + meta["etag"].asString() + "\"");
-    r->addHeader("Content-Length", std::to_string(meta["size"].asInt64()));
+    // No manual Content-Length: setBody sets one, and the two together are a
+    // duplicate header. curl accepts that, so the route looked fine when
+    // probed by hand, but Node's fetch rejects the response outright as a
+    // protocol violation -- which made every image unreachable from the app
+    // while the store appeared to serve it perfectly.
     r->addHeader("Last-Modified", meta["last_modified"].asString());
     r->setBody(std::move(data));
     cb(r);
@@ -58,6 +62,10 @@ void ObjectCtrl::headObject(const HttpRequestPtr& req,
         r->setStatusCode(k404NotFound);
     } else {
         r->addHeader("ETag", "\"" + meta["etag"].asString() + "\"");
+        // HEAD has no body for setBody to measure, so the size has to be
+        // stated. If drogon also emits a zero-length header here this has the
+        // same duplicate problem as GET did; untested, since nothing calls
+        // HEAD yet.
         r->addHeader("Content-Length", std::to_string(meta["size"].asInt64()));
         r->setContentTypeString(meta["content_type"].asString());
     }
