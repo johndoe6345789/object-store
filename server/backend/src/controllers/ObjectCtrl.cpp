@@ -5,6 +5,7 @@
 
 #include "ObjectCtrl.h"
 #include "../services/BucketStore.h"
+#include "../services/S3Response.h"
 #include "../services/Globals.h"
 #include "../services/ObjectStore.h"
 
@@ -20,18 +21,16 @@ void ObjectCtrl::getObject(const HttpRequestPtr& req,
     int bid = BucketStore::getId(
         bucket, req->attributes()->get<std::string>("owner"));
     if (bid == 0) {
-        auto r = HttpResponse::newHttpResponse();
-        r->setStatusCode(k404NotFound);
-        r->setBody("NoSuchBucket");
+        auto r = s3Error(k404NotFound, "NoSuchBucket",
+                          "The specified bucket does not exist");
         cb(r);
         return;
     }
 
     auto meta = ObjectStore::get(bid, key);
     if (meta.isNull()) {
-        auto r = HttpResponse::newHttpResponse();
-        r->setStatusCode(k404NotFound);
-        r->setBody("NoSuchKey");
+        auto r = s3Error(k404NotFound, "NoSuchKey",
+                          "The specified key does not exist");
         cb(r);
         return;
     }

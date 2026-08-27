@@ -50,7 +50,14 @@ class ObjectStore
 
     /// @brief List objects with optional prefix.
     static std::vector<Json::Value>
-    list(int bucketId, const std::string& prefix, int maxKeys = 1000);
+    /// Objects in key order, starting after @p startAfter when given.
+    ///
+    /// Callers asking for N should ask for N+1 and treat the extra row as
+    /// "there is more": the listing previously declared IsTruncated=false
+    /// unconditionally, so a bucket with more objects than the limit reported
+    /// a complete listing that was missing most of it.
+    list(int bucketId, const std::string& prefix, int maxKeys = 1000,
+         const std::string& startAfter = "");
 
     /// @brief Delete object, return storage_path.
     static std::string remove(int bucketId, const std::string& key)

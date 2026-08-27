@@ -5,6 +5,7 @@
 
 #include "AuthFilter.h"
 #include "../services/DbPool.h"
+#include "../services/S3Response.h"
 
 using namespace drogon;
 
@@ -16,9 +17,8 @@ void AuthFilter::doFilter(const HttpRequestPtr& req, FilterCallback&& cb,
 {
     auto auth = req->getHeader("Authorization");
     if (auth.empty()) {
-        auto r = HttpResponse::newHttpResponse();
-        r->setStatusCode(k403Forbidden);
-        r->setBody("AccessDenied");
+        auto r = s3Error(k403Forbidden, "AccessDenied",
+                          "Access denied");
         cb(r);
         return;
     }
@@ -31,18 +31,16 @@ void AuthFilter::doFilter(const HttpRequestPtr& req, FilterCallback&& cb,
     if (auth.starts_with("AWS ")) {
         auto colon = auth.find(':', 4);
         if (colon == std::string::npos) {
-            auto r = HttpResponse::newHttpResponse();
-            r->setStatusCode(k403Forbidden);
-            r->setBody("InvalidAuthorizationHeader");
+            auto r = s3Error(k403Forbidden, "InvalidAuthorizationHeader",
+                          "The authorization header is malformed");
             cb(r);
             return;
         }
         key = auth.substr(4, colon - 4);
         suppliedSecret = auth.substr(colon + 1);
     } else {
-        auto r = HttpResponse::newHttpResponse();
-        r->setStatusCode(k403Forbidden);
-        r->setBody("InvalidAuthorizationHeader");
+        auto r = s3Error(k403Forbidden, "InvalidAuthorizationHeader",
+                          "The authorization header is malformed");
         cb(r);
         return;
     }
@@ -53,9 +51,8 @@ void AuthFilter::doFilter(const HttpRequestPtr& req, FilterCallback&& cb,
                                        "FROM api_keys WHERE access_key=$1",
                                        key);
         if (rows.empty() || rows[0]["secret_key"].as<std::string>() != suppliedSecret) {
-            auto r = HttpResponse::newHttpResponse();
-            r->setStatusCode(k403Forbidden);
-            r->setBody("InvalidAccessKeyId");
+            auto r = s3Error(k403Forbidden, "InvalidAccessKeyId",
+                          "The access key id you provided does not exist");
             cb(r);
             return;
         }
@@ -64,9 +61,8 @@ void AuthFilter::doFilter(const HttpRequestPtr& req, FilterCallback&& cb,
         const auto required = isRead ? "read" : "write";
         if (permissions.find(required) == std::string::npos &&
             permissions.find("admin") == std::string::npos) {
-            auto r = HttpResponse::newHttpResponse();
-            r->setStatusCode(k403Forbidden);
-            r->setBody("AccessDenied");
+            auto r = s3Error(k403Forbidden, "AccessDenied",
+                          "Access denied");
             cb(r);
             return;
         }

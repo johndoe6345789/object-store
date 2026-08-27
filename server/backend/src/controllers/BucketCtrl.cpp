@@ -5,6 +5,8 @@
 
 #include "BucketCtrl.h"
 #include "../services/BucketStore.h"
+#include "../services/S3Response.h"
+#include "../services/XmlUtil.h"
 #include "../services/Globals.h"
 
 using namespace drogon;
@@ -25,9 +27,8 @@ void BucketCtrl::createBucket(const HttpRequestPtr& req,
 {
     bool ok = BucketStore::create(bucket, Globals::region, requestOwner(req));
     if (!ok) {
-        auto r = HttpResponse::newHttpResponse();
-        r->setStatusCode(k409Conflict);
-        r->setBody("BucketAlreadyExists");
+        auto r = s3Error(k409Conflict, "BucketAlreadyExists",
+                          "The requested bucket name is not available");
         cb(r);
         return;
     }
@@ -67,11 +68,15 @@ void BucketCtrl::listBuckets(const HttpRequestPtr& req,
     auto buckets = BucketStore::list(requestOwner(req));
     // Return S3-style XML response
     std::string xml = "<?xml version=\"1.0\"?>"
-                      "<ListAllMyBucketsResult>"
-                      "<Buckets>";
+                      "<ListAllMyBucketsResult xmlns=\"";
+    xml += kS3Namespace;
+    xml += "\"><Buckets>";
     for (const auto& b : buckets) {
-        xml += "<Bucket><Name>" + b["name"].asString() +
-               "</Name><CreationDate>" + b["created_at"].asString() +
+        // Names are escaped and the date converted: PostgreSQL's format is
+        // not the ISO8601 an S3 client parses into a timestamp.
+        xml += "<Bucket><Name>" + xmlEscape(b["name"].asString()) +
+               "</Name><CreationDate>" +
+               xmlEscape(isoTimestamp(b["created_at"].asString())) +
                "</CreationDate></Bucket>";
     }
     xml += "</Buckets></ListAllMyBucketsResult>";
