@@ -4,6 +4,7 @@
  */
 
 #include "services/Globals.h"
+#include "services/Workers.h"
 #include <drogon/drogon.h>
 #include <iostream>
 
@@ -27,6 +28,12 @@ int main(int argc, char* argv[])
         port = std::stoi(e);
 
     s3::Globals::init(dataDir, dbConn, region);
+
+    // Handlers run here, never on the IO loops: every store call is
+    // synchronous, and a blocked loop stops answering every connection the
+    // kernel gives it afterwards (services/Workers.h). Matched to the db
+    // pool so a worker rarely waits for a connection.
+    s3::Workers::init(8);
 
     drogon::app()
         .setLogPath("./")

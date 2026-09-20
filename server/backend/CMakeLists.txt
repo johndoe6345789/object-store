@@ -34,3 +34,27 @@ target_link_libraries(s3server
 install(TARGETS s3server
     RUNTIME DESTINATION bin
 )
+
+# Unit tests: plain executables with asserts, no framework to install.
+# Nothing built them before, so they could not fail.
+#   cmake --build out --target s3tests && ./out/s3tests   (or ctest)
+enable_testing()
+
+add_executable(s3tests EXCLUDE_FROM_ALL
+    tests/run_tests.cpp
+    tests/s3_response_test.cpp
+    tests/blob_store_test.cpp
+)
+
+target_include_directories(s3tests
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_link_libraries(s3tests
+    PRIVATE
+        Drogon::Drogon
+        OpenSSL::SSL
+        OpenSSL::Crypto
+)
+
+add_test(NAME s3tests COMMAND s3tests)

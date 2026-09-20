@@ -7,10 +7,8 @@
 #include "../services/S3Response.h"
 #include "../services/Globals.h"
 #include "../services/ObjectStore.h"
+#include "../services/OffLoop.h"
 #include "ObjectCtrl.h"
-
-#include <memory>
-#include <thread>
 
 using namespace drogon;
 
@@ -21,58 +19,55 @@ void ObjectCtrl::putObject(const HttpRequestPtr& req,
                            std::function<void(const HttpResponsePtr&)>&& cb,
                            const std::string& bucket, const std::string& key)
 {
-    int bid = BucketStore::getId(
-        bucket, req->attributes()->get<std::string>("owner"));
-    if (bid == 0) {
-        auto r = s3Error(k404NotFound, "NoSuchBucket",
-                          "The specified bucket does not exist");
-        cb(r);
-        return;
-    }
-
     auto ct = std::string(req->getHeader("Content-Type"));
     if (ct.empty())
         ct = "application/octet-stream";
 
-    // Capture `req` (shared_ptr) so the body buffer stays alive in the thread.
-    // This avoids copying potentially hundreds of MB — store() reads directly
-    // from the request buffer via string_view.
-    auto cbPtr = std::make_shared<std::function<void(const HttpResponsePtr&)>>(
-        std::move(cb));
+    // `req` (shared_ptr) is captured so the body buffer outlives the handler:
+    // store() reads it via string_view rather than copying what may be
+    // hundreds of MB. The work runs on a Workers thread -- previously a
+    // detached std::thread per request, which was unbounded, while the
+    // bucket lookup still blocked the IO loop.
+    offLoop(std::move(cb), [req, bucket, key, ct]() -> HttpResponsePtr {
+        int bid = BucketStore::getId(
+            bucket, req->attributes()->get<std::string>("owner"));
+        if (bid == 0)
+            return s3Error(k404NotFound, "NoSuchBucket",
+                           "The specified bucket does not exist");
 
-    // Run the disk write off the IO thread so large blobs don't block the
-    // event loop long enough to drop postgres keepalives.
-    std::thread([bid, bucket, key, ct, req, cbPtr]() {
         auto res = Globals::blobs->store(bucket, key, req->body());
         ObjectStore::put(bid, key, res.etag, (int64_t)res.size, ct, res.path);
 
         auto r = HttpResponse::newHttpResponse();
         r->addHeader("ETag", "\"" + res.etag + "\"");
         r->setStatusCode(k200OK);
-        (*cbPtr)(r);
-    }).detach();
+        return r;
+    });
 }
 
 void ObjectCtrl::deleteObject(const HttpRequestPtr& req,
                               std::function<void(const HttpResponsePtr&)>&& cb,
                               const std::string& bucket, const std::string& key)
 {
-    int bid = BucketStore::getId(
-        bucket, req->attributes()->get<std::string>("owner"));
-    if (bid == 0) {
+    offLoop(std::move(cb), [req, bucket, key]() -> HttpResponsePtr {
+        int bid = BucketStore::getId(
+            bucket, req->attributes()->get<std::string>("owner"));
         auto r = HttpResponse::newHttpResponse();
-        r->setStatusCode(k404NotFound);
-        cb(r);
-        return;
-    }
+        if (bid == 0) {
+            r->setStatusCode(k404NotFound);
+            return r;
+        }
 
-    auto path = ObjectStore::remove(bid, key);
-    if (!path.empty())
-        Globals::blobs->remove(path);
+        auto path = ObjectStore::remove(bid, key);
+        // Only drop the file when no other key still points at it: blobs are
+        // content-addressed, so identical uploads share one file and deleting
+        // it unconditionally emptied the survivors.
+        if (!path.empty() && !ObjectStore::pathInUse(path))
+            Globals::blobs->remove(path);
 
-    auto r = HttpResponse::newHttpResponse();
-    r->setStatusCode(k204NoContent);
-    cb(r);
+        r->setStatusCode(k204NoContent);
+        return r;
+    });
 }
 
 } // namespace s3

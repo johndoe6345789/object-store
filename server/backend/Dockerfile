@@ -19,8 +19,11 @@ RUN git clone --depth 1 --branch v1.9.3 \
 WORKDIR /build
 COPY backend/CMakeLists.txt .
 COPY backend/src/ src/
+COPY backend/tests/ tests/
 RUN cmake -B out -DCMAKE_BUILD_TYPE=Release && \
     cmake --build out -j$(nproc)
+# Unit tests run in the build: a broken store should never reach an image.
+RUN cmake --build out --target s3tests -j$(nproc) && ./out/s3tests
 
 FROM ubuntu:24.04
 RUN apt-get update && apt-get install -y --no-install-recommends \

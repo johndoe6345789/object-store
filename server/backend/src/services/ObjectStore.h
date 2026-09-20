@@ -60,6 +60,17 @@ class ObjectStore
          const std::string& startAfter = "");
 
     /// @brief Delete object, return storage_path.
+    /// @brief Is any (other) object still pointing at this blob?
+    // Blobs are content-addressed, so identical bytes under two keys are one
+    // file: deleting one key must not delete the other key's data.
+    static bool pathInUse(const std::string& storagePath)
+    {
+        auto r = DbPool::get()->execSqlSync(
+            "SELECT 1 FROM objects WHERE storage_path=$1 LIMIT 1",
+            storagePath);
+        return !r.empty();
+    }
+
     static std::string remove(int bucketId, const std::string& key)
     {
         auto r = DbPool::get()->execSqlSync("DELETE FROM objects "

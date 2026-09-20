@@ -6,9 +6,12 @@
 #pragma once
 
 #include "DigestUtil.h"
+#include <unistd.h>
 
 #include <filesystem>
 #include <fstream>
+#include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 
@@ -51,15 +54,19 @@ class BlobStore
         return {etag, data.size(), rel};
     }
 
-    /// @brief Read blob by storage path.
-    std::string read(const std::string& path)
+    /// @brief Read blob by storage path; nullopt when it is not there.
+    // Returning an empty string for a missing blob made a GET answer 200
+    // with no body, so a lost blob looked like an empty object.
+    std::optional<std::string> read(const std::string& path)
     {
         auto full = root_ / path;
         if (!std::filesystem::exists(full))
-            return {};
+            return std::nullopt;
         std::ifstream f(full, std::ios::binary);
-        return {std::istreambuf_iterator<char>(f),
-                std::istreambuf_iterator<char>()};
+        if (!f)
+            return std::nullopt;
+        return std::string{std::istreambuf_iterator<char>(f),
+                           std::istreambuf_iterator<char>()};
     }
 
     /// @brief Delete blob by storage path.

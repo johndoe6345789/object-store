@@ -5,6 +5,7 @@
 
 #include "AuthFilter.h"
 #include "../services/DbPool.h"
+#include "../services/OffLoop.h"
 #include "../services/S3Response.h"
 
 using namespace drogon;
@@ -45,36 +46,45 @@ void AuthFilter::doFilter(const HttpRequestPtr& req, FilterCallback&& cb,
         return;
     }
 
-    try {
-        auto rows =
-            DbPool::get()->execSqlSync("SELECT access_key, secret_key, owner, permissions "
-                                       "FROM api_keys WHERE access_key=$1",
-                                       key);
-        if (rows.empty() || rows[0]["secret_key"].as<std::string>() != suppliedSecret) {
-            auto r = s3Error(k403Forbidden, "InvalidAccessKeyId",
-                          "The access key id you provided does not exist");
+    // The api_keys lookup blocks, and this filter runs on every request: on
+    // an IO loop one slow query stops that loop serving any connection again
+    // (services/Workers.h). Both callbacks are safe to call from a worker.
+    auto cbPtr = std::make_shared<FilterCallback>(std::move(cb));
+    auto ccbPtr = std::make_shared<FilterChainCallback>(std::move(ccb));
+    Workers::post([req, key, suppliedSecret, cbPtr, ccbPtr] {
+        auto cb = [&](const HttpResponsePtr& r) { (*cbPtr)(r); };
+        auto ccb = [&] { (*ccbPtr)(); };
+        try {
+            auto rows =
+                DbPool::get()->execSqlSync("SELECT access_key, secret_key, owner, permissions "
+                                           "FROM api_keys WHERE access_key=$1",
+                                           key);
+            if (rows.empty() || rows[0]["secret_key"].as<std::string>() != suppliedSecret) {
+                auto r = s3Error(k403Forbidden, "InvalidAccessKeyId",
+                              "The access key id you provided does not exist");
+                cb(r);
+                return;
+            }
+            const auto permissions = rows[0]["permissions"].as<std::string>();
+            const bool isRead = req->getMethod() == Get || req->getMethod() == Head;
+            const auto required = isRead ? "read" : "write";
+            if (permissions.find(required) == std::string::npos &&
+                permissions.find("admin") == std::string::npos) {
+                auto r = s3Error(k403Forbidden, "AccessDenied",
+                              "Access denied");
+                cb(r);
+                return;
+            }
+            req->attributes()->insert("access_key", key);
+            req->attributes()->insert(
+                "owner", rows[0]["owner"].as<std::string>());
+            ccb();
+        } catch (...) {
+            auto r = HttpResponse::newHttpResponse();
+            r->setStatusCode(k500InternalServerError);
             cb(r);
-            return;
         }
-        const auto permissions = rows[0]["permissions"].as<std::string>();
-        const bool isRead = req->getMethod() == Get || req->getMethod() == Head;
-        const auto required = isRead ? "read" : "write";
-        if (permissions.find(required) == std::string::npos &&
-            permissions.find("admin") == std::string::npos) {
-            auto r = s3Error(k403Forbidden, "AccessDenied",
-                          "Access denied");
-            cb(r);
-            return;
-        }
-        req->attributes()->insert("access_key", key);
-        req->attributes()->insert(
-            "owner", rows[0]["owner"].as<std::string>());
-        ccb();
-    } catch (...) {
-        auto r = HttpResponse::newHttpResponse();
-        r->setStatusCode(k500InternalServerError);
-        cb(r);
-    }
+    });
 }
 
 } // namespace s3
