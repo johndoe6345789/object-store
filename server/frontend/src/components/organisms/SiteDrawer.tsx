@@ -3,7 +3,7 @@
 import {
   Drawer, Box, Typography,
   Divider, IconButton, Close, Cloud,
-} from '@metabuilder/m3';
+} from '@/ui';
 import DrawerNavLinks from './DrawerNavLinks';
 import DrawerSiteLinks from './DrawerSiteLinks';
 import DrawerLogout from './DrawerLogout';

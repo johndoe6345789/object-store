@@ -1,6 +1,6 @@
 'use client';
 
-import { Typography } from '@metabuilder/m3';
+import { Typography } from '@/ui';
 import { formatBytes } from '@/utils';
 
 /** @brief Props for SizeLabel atom. */

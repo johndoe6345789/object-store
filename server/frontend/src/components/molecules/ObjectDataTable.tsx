@@ -4,7 +4,7 @@ import {
   Table, TableBody, TableCell,
   TableContainer, TableHead,
   TableRow, Paper, Typography,
-} from '@metabuilder/m3';
+} from '@/ui';
 import type { S3Object } from '@/types';
 import ObjectRow from './ObjectRow';
 import labels from '@/constants/ui-labels.json';

@@ -5,6 +5,7 @@
 
 #include "ObjectStore.h"
 #include "ObjectStoreUtil.h"
+#include "NameUtil.h"
 
 namespace s3
 {
@@ -18,17 +19,17 @@ ObjectStore::list(int bucketId, const std::string& prefix, int maxKeys,
     std::string sql = "SELECT * FROM objects WHERE bucket_id=$1";
     int n = 1;
     if (!prefix.empty())
-        sql += " AND key LIKE $" + std::to_string(++n);
+        sql += " AND key LIKE $" + std::to_string(++n) + " ESCAPE '\\'";
     if (!startAfter.empty())
         sql += " AND key > $" + std::to_string(++n);
     sql += " ORDER BY key LIMIT " + std::to_string(maxKeys);
 
     drogon::orm::Result r = [&] {
         if (!prefix.empty() && !startAfter.empty())
-            return DbPool::get()->execSqlSync(sql, bucketId, prefix + "%",
+            return DbPool::get()->execSqlSync(sql, bucketId, likeEscape(prefix) + "%",
                                               startAfter);
         if (!prefix.empty())
-            return DbPool::get()->execSqlSync(sql, bucketId, prefix + "%");
+            return DbPool::get()->execSqlSync(sql, bucketId, likeEscape(prefix) + "%");
         if (!startAfter.empty())
             return DbPool::get()->execSqlSync(sql, bucketId, startAfter);
         return DbPool::get()->execSqlSync(sql, bucketId);

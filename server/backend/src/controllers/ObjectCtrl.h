@@ -14,14 +14,17 @@ class ObjectCtrl : public drogon::HttpController<ObjectCtrl>
 {
   public:
     METHOD_LIST_BEGIN
-    ADD_METHOD_TO(ObjectCtrl::putObject, "/{bucket}/{key:.*}", drogon::Put,
-                  "s3::AuthFilter");
-    ADD_METHOD_TO(ObjectCtrl::getObject, "/{bucket}/{key:.*}", drogon::Get,
-                  "s3::AuthFilter");
-    ADD_METHOD_TO(ObjectCtrl::headObject, "/{bucket}/{key:.*}", drogon::Head,
-                  "s3::AuthFilter");
-    ADD_METHOD_TO(ObjectCtrl::deleteObject, "/{bucket}/{key:.*}",
-                  drogon::Delete, "s3::AuthFilter");
+    // Regex routes, not "/{bucket}/{key:.*}": drogon turns every {name} into
+    // ([^/]*), so that pattern never matched a key containing a slash and
+    // "dir/file" answered 404. Here the key is everything after the bucket.
+    ADD_METHOD_VIA_REGEX(ObjectCtrl::putObject, "/([^/]+)/(.+)", drogon::Put,
+                         "s3::AuthFilter");
+    ADD_METHOD_VIA_REGEX(ObjectCtrl::getObject, "/([^/]+)/(.+)", drogon::Get,
+                         "s3::AuthFilter");
+    ADD_METHOD_VIA_REGEX(ObjectCtrl::headObject, "/([^/]+)/(.+)", drogon::Head,
+                         "s3::AuthFilter");
+    ADD_METHOD_VIA_REGEX(ObjectCtrl::deleteObject, "/([^/]+)/(.+)", drogon::Delete,
+                         "s3::AuthFilter");
     METHOD_LIST_END
 
     void putObject(const drogon::HttpRequestPtr&,

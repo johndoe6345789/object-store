@@ -3,7 +3,7 @@
 import {
   TableRow, TableCell, IconButton,
   Stack, Download, Delete,
-} from '@metabuilder/m3';
+} from '@/ui';
 import { FileIcon, SizeLabel } from '../atoms';
 import type { S3Object } from '@/types';
 import labels from '@/constants/ui-labels.json';

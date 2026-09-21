@@ -33,23 +33,23 @@ void ObjectCtrl::getObject(const HttpRequestPtr& req,
             return s3Error(k404NotFound, "NoSuchKey",
                            "The specified key does not exist");
 
-        auto data = Globals::blobs->read(meta["storage_path"].asString());
-        if (!data)
+        // Streamed from disk (sendfile for big blobs): a 1 GB object must
+        // not be read into memory to be served.
+        auto full = Globals::blobs->fullPath(meta["storage_path"].asString());
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(full, ec))
             // Metadata without bytes is a broken store, not an empty object:
             // say so instead of answering 200 with nothing.
             return s3Error(k500InternalServerError, "InternalError",
                            "The object data could not be read");
 
-        auto r = HttpResponse::newHttpResponse();
-        r->setContentTypeString(meta["content_type"].asString());
+        auto r = HttpResponse::newFileResponse(
+            full.string(), "", CT_NONE, meta["content_type"].asString());
         r->addHeader("ETag", "\"" + meta["etag"].asString() + "\"");
-        // No manual Content-Length: setBody sets one, and the two together
-        // are a duplicate header. curl accepts that, so the route looked fine
-        // when probed by hand, but Node's fetch rejects the response outright
-        // as a protocol violation -- which made every image unreachable from
-        // the app while the store appeared to serve it perfectly.
+        // No manual Content-Length: the file response sets one, and the two
+        // together are a duplicate header, which Node's fetch rejects as a
+        // protocol violation.
         r->addHeader("Last-Modified", meta["last_modified"].asString());
-        r->setBody(std::move(*data));
         return r;
     });
 }

@@ -4,7 +4,7 @@ import {
   AppBar, Toolbar, Typography,
   Button, Box, Cloud,
   AppHeaderActions,
-} from '@metabuilder/m3';
+} from '@/ui';
 import { useS3Auth } from '@/hooks';
 import labels from '@/constants/ui-labels.json';
 import routes from '@/constants/routes.json';

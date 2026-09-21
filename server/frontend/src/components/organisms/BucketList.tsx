@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import {
   Button, Typography, Stack, Add,
-} from '@metabuilder/m3';
+} from '@/ui';
 import type { Bucket } from '@/types';
 import {
   BucketGrid,
