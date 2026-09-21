@@ -120,6 +120,23 @@ void getObject(CtxPtr c, S3Callback&& cb)
                      httpDate(static_cast<time_t>(
                          meta["last_modified_epoch"].asInt64())));
         applyMetadata(r, meta["metadata"]);
+        // Query overrides (usually from a presigned URL, e.g. to force a
+        // download name): they replace the stored values for this response.
+        static const std::pair<const char*, const char*> kOverrides[] = {
+            {"response-content-type", "Content-Type"},
+            {"response-content-disposition", "Content-Disposition"},
+            {"response-cache-control", "Cache-Control"},
+            {"response-content-encoding", "Content-Encoding"},
+            {"response-content-language", "Content-Language"},
+            {"response-expires", "Expires"}};
+        for (const auto& [param, header] : kOverrides)
+            if (auto v = c->query.find(param); v && !v->empty() &&
+                v->find_first_of("\r\n") == std::string::npos) {
+                if (std::string(header) == "Content-Type")
+                    r->setContentTypeString(*v);
+                else
+                    r->addHeader(header, *v);
+            }
         // The stored whole-object checksum, when asked for (and not for a
         // partial body, whose checksum it would not match).
         if (rng.kind != ByteRange::Ok &&

@@ -60,3 +60,29 @@ jobs:
       # isolation and the multipart upload contract.
       - name: Integration tests
         run: IMAGE=s3server:ci server/backend/tests/integration/run.sh
+      # Handed to the SDK job so the (slow) image build happens once.
+      - name: Save image for the SDK job
+        run: docker save s3server:ci | gzip -1 > s3server-ci.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: s3server-image
+          path: s3server-ci.tar.gz
+          retention-days: 1
+  # Real clients (boto3, aws-cli v2, @aws-sdk/client-s3 v3 + lib-storage,
+  # rclone) from containers against the freshly built image, both directly and
+  # through an nginx TLS reverse proxy. Includes a 120 MB multipart upload and
+  # a 100 MB aws-cli copy, so it takes several minutes.
+  sdk-clients:
+    name: S3 SDK clients (SigV4)
+    needs: cpp-server-backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          name: s3server-image
+      - name: Load image
+        run: gunzip -c s3server-ci.tar.gz | docker load
+      - name: boto3, aws-cli, aws-sdk-js v3, rclone
+        run: IMAGE=s3server:ci server/backend/tests/sdk/run.sh
