@@ -24,25 +24,38 @@ class ObjectStore
     static void put(int bucketId, const std::string& key,
                     const std::string& etag, int64_t size,
                     const std::string& contentType,
-                    const std::string& storagePath)
+                    const std::string& storagePath,
+                    const std::string& metadataJson = "{}")
     {
         DbPool::get()->execSqlSync("INSERT INTO objects "
                                    "(bucket_id,key,etag,size,"
-                                   "content_type,storage_path) "
-                                   "VALUES ($1,$2,$3,$4,$5,$6) "
+                                   "content_type,storage_path,metadata) "
+                                   "VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb) "
                                    "ON CONFLICT (bucket_id,key) DO UPDATE SET "
                                    "etag=$3, size=$4, content_type=$5, "
-                                   "storage_path=$6, updated_at=now()",
+                                   "storage_path=$6, metadata=$7::jsonb, "
+                                   "updated_at=now()",
                                    bucketId, key, etag, size, contentType,
-                                   storagePath);
+                                   storagePath, metadataJson);
+    }
+
+    /// @brief Does the bucket hold any object?
+    static bool bucketHasObjects(int bucketId)
+    {
+        return !DbPool::get()
+                    ->execSqlSync("SELECT 1 FROM objects WHERE bucket_id=$1 "
+                                  "LIMIT 1",
+                                  bucketId)
+                    .empty();
     }
 
     /// @brief Get object metadata.
     static Json::Value get(int bucketId, const std::string& key)
     {
-        auto r = DbPool::get()->execSqlSync("SELECT * FROM objects "
-                                            "WHERE bucket_id=$1 AND key=$2",
-                                            bucketId, key);
+        auto r = DbPool::get()->execSqlSync(
+            std::string("SELECT ") + ObjectStoreUtil::kCols +
+                " FROM objects WHERE bucket_id=$1 AND key=$2",
+            bucketId, key);
         if (r.empty())
             return Json::nullValue;
         return ObjectStoreUtil::rowToJson(r[0]);
@@ -57,7 +70,7 @@ class ObjectStore
     /// unconditionally, so a bucket with more objects than the limit reported
     /// a complete listing that was missing most of it.
     list(int bucketId, const std::string& prefix, int maxKeys = 1000,
-         const std::string& startAfter = "");
+         const std::string& startAfter = "", bool inclusive = false);
 
     /// @brief Delete object, return storage_path.
     /// @brief Is any (other) object still pointing at this blob?

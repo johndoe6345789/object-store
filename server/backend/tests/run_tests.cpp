@@ -8,6 +8,9 @@ int blobStoreTest();
 int authUtilTest();
 int nameUtilTest();
 int multipartTest();
+int sigv4Test();
+int chunkedDecoderTest();
+int s3MiscTest();
 
 int main()
 {
@@ -16,5 +19,8 @@ int main()
     authUtilTest();
     nameUtilTest();
     multipartTest();
+    sigv4Test();
+    chunkedDecoderTest();
+    s3MiscTest();
     return 0;
 }

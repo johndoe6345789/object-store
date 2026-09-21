@@ -12,6 +12,12 @@
 namespace s3
 {
 
+namespace {
+constexpr const char* kBucketIso =
+    "to_char(created_at AT TIME ZONE 'UTC', "
+    "'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS created_iso";
+}
+
 bool BucketStore::create(const std::string& name,
                          const std::string& region,
                          const std::string& owner)
@@ -38,7 +44,7 @@ Json::Value BucketStore::get(const std::string& name,
                              const std::string& owner)
 {
     auto r = DbPool::get()->execSqlSync(
-        "SELECT * FROM buckets WHERE name=$1 AND owner=$2", name, owner);
+        "SELECT *, " + std::string(kBucketIso) + " FROM buckets WHERE name=$1 AND owner=$2", name, owner);
     if (r.empty())
         return Json::nullValue;
     return rowToJson(r[0]);
@@ -47,7 +53,7 @@ Json::Value BucketStore::get(const std::string& name,
 std::vector<Json::Value> BucketStore::list(const std::string& owner)
 {
     auto r = DbPool::get()->execSqlSync(
-        "SELECT * FROM buckets WHERE owner=$1 ORDER BY name", owner);
+        "SELECT *, " + std::string(kBucketIso) + " FROM buckets WHERE owner=$1 ORDER BY name", owner);
     std::vector<Json::Value> out;
     for (const auto& row : r)
         out.push_back(rowToJson(row));
@@ -91,8 +97,7 @@ Json::Value BucketStore::rowToJson(
     j["name"] = row["name"].as<std::string>();
     j["region"] = row["region"].as<std::string>();
     j["owner"] = row["owner"].as<std::string>();
-    j["created_at"] =
-        row["created_at"].as<std::string>();
+    j["created_at"] = row["created_iso"].as<std::string>();
     return j;
 }
 

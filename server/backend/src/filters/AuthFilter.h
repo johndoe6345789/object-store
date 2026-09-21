@@ -1,6 +1,6 @@
 /**
  * @file AuthFilter.h
- * @brief Simple access-key authentication for S3.
+ * @brief AWS Signature V4 authentication for every S3 route.
  */
 
 #pragma once
@@ -10,8 +10,11 @@
 namespace s3
 {
 
-/// @brief Validates Authorization header access key.
-///        Sets "access_key" attribute on the request.
+/// @brief Authenticates with SigV4 (Authorization header or presigned query),
+///        applies key permissions, and verifies/decodes the body payload.
+///        Sets the request attributes "access_key", "owner", "permissions"
+///        and "payload" (the decoded body, see sigv4/PayloadReader.h).
+///        /health is the only unauthenticated path.
 class AuthFilter : public drogon::HttpFilter<AuthFilter>
 {
   public:

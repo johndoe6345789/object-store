@@ -1,10 +1,11 @@
 import { backendPath, backendBase } from '@/utils/backendPath';
+import { signV4, canonicalUri, canonicalQuery } from '@/utils/sigv4';
 
 // Read S3_BACKEND_URL when a request arrives, not at build time, so one image
 // works against any backend. (next.config rewrites are baked into the build.)
 export const dynamic = 'force-dynamic';
 
-const FORWARD_REQUEST = ['authorization', 'content-type', 'content-length'];
+const FORWARD_REQUEST = ['content-type', 'content-length'];
 const FORWARD_RESPONSE = [
   'content-type',
   'content-length',
@@ -27,11 +28,30 @@ async function proxy(
     const v = req.headers.get(h);
     if (v) headers.set(h, v);
   }
+  const accessKey = req.headers.get('x-s3-access-key');
+  const secretKey = req.headers.get('x-s3-secret-key');
+  const base = new URL(`${backendBase()}/`);
+  const search = new URL(req.url).search;
+  const query = canonicalQuery(search);
+  if (accessKey && secretKey) {
+    // base.host omits default ports, matching what undici sends.
+    const signed = signV4({
+      method: req.method,
+      path: target,
+      query: search,
+      host: base.host,
+      accessKey,
+      secretKey,
+      region: process.env.S3_REGION || 'us-east-1',
+    });
+    headers.set('x-amz-date', signed.amzDate);
+    headers.set('x-amz-content-sha256', signed.payloadHash);
+    headers.set('authorization', signed.authorization);
+  }
   const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
-  const url = new URL(req.url);
   let upstream: Response;
   try {
-    upstream = await fetch(`${backendBase()}${target}${url.search}`, {
+    upstream = await fetch(`${backendBase()}${canonicalUri(target)}${query ? `?${query}` : ''}`, {
       method: req.method,
       headers,
       body: hasBody ? req.body : undefined,

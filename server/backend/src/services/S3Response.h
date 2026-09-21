@@ -11,9 +11,11 @@
 
 #pragma once
 
+#include <drogon/HttpRequest.h>
 #include <drogon/HttpResponse.h>
 #include <string>
 
+#include "DigestUtil.h"
 #include "XmlUtil.h"
 
 namespace s3
@@ -37,10 +39,11 @@ inline drogon::HttpResponsePtr s3Error(drogon::HttpStatusCode status,
                                        const std::string& message,
                                        const std::string& resource = "")
 {
+    // Like S3, no namespace on <Error>; RequestId/HostId are added on the way
+    // out by stampResponse(), which knows the request.
     std::string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-                      "<Error xmlns=\"";
-    xml += kS3Namespace;
-    xml += "\"><Code>" + xmlEscape(code) + "</Code>";
+                      "<Error>";
+    xml += "<Code>" + xmlEscape(code) + "</Code>";
     xml += "<Message>" + xmlEscape(message) + "</Message>";
     if (!resource.empty())
         xml += "<Resource>" + xmlEscape(resource) + "</Resource>";
@@ -51,6 +54,54 @@ inline drogon::HttpResponsePtr s3Error(drogon::HttpStatusCode status,
     r->setContentTypeString("application/xml");
     r->setBody(xml);
     return r;
+}
+
+/// @brief s3Error for the plain int statuses the auth layer carries.
+inline drogon::HttpResponsePtr s3ErrorStatus(int status, const std::string& code,
+                                             const std::string& message,
+                                             const std::string& resource = "")
+{
+    return s3Error(static_cast<drogon::HttpStatusCode>(status), code, message,
+                   resource);
+}
+
+/// @brief A 16-character upper-case hex id, like S3's x-amz-request-id.
+inline std::string newRequestId()
+{
+    auto h = randomHex(8);
+    for (auto& c : h)
+        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return h;
+}
+
+/**
+ * @brief Runs on every response just before it is sent (registered as a
+ *        drogon pre-sending advice): adds x-amz-request-id / x-amz-id-2 and,
+ *        for error documents, the matching <RequestId>/<HostId> elements.
+ */
+inline void stampResponse(const drogon::HttpRequestPtr& req,
+                          const drogon::HttpResponsePtr& resp)
+{
+    std::string id;
+    auto attrs = req->attributes();
+    if (attrs->find("request_id"))
+        id = attrs->get<std::string>("request_id");
+    else {
+        id = newRequestId();
+        attrs->insert("request_id", id);
+    }
+    resp->addHeader("x-amz-request-id", id);
+    resp->addHeader("x-amz-id-2", id + randomHex(12));
+    constexpr std::string_view tail = "</Error>";
+    auto body = resp->body();
+    if (body.size() > tail.size() &&
+        body.substr(body.size() - tail.size()) == tail &&
+        body.find("<RequestId>") == std::string_view::npos) {
+        std::string b(body.substr(0, body.size() - tail.size()));
+        b += "<RequestId>" + id + "</RequestId><HostId>" + id +
+             "</HostId></Error>";
+        resp->setBody(std::move(b));
+    }
 }
 
 /**
