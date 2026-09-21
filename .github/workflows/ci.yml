@@ -31,10 +31,16 @@ jobs:
           restore-keys: npm-${{ runner.os }}-
       - name: Install (server/frontend)
         working-directory: server/frontend
-        run: npm install
+        run: npm ci
       - name: lint (server/frontend)
         working-directory: server/frontend
         run: npm run lint
+      - name: typecheck (server/frontend)
+        working-directory: server/frontend
+        run: npm run typecheck
+      - name: test (server/frontend)
+        working-directory: server/frontend
+        run: npm test
       - name: build (server/frontend)
         working-directory: server/frontend
         run: npm run build
@@ -43,11 +49,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      # Built through the Dockerfile's builder stage, which installs drogon:
-      # configuring here directly failed on find_package(Drogon) every run
-      # since the workflow was added. The stage also runs the unit tests.
-      - name: Build backend and run unit tests
+      # Built through the Dockerfile: configuring here directly failed on
+      # find_package(Drogon) every run since the workflow was added. The
+      # builder stage installs drogon and runs the unit tests (s3tests); the
+      # full build also yields the image the integration script drives.
+      - name: Build backend image (runs unit tests)
         working-directory: server
-        run: |
-          docker build --target builder \
-            -f backend/Dockerfile .
+        run: docker build -t s3server:ci -f backend/Dockerfile .
+      # Real server + postgres in throwaway containers: auth, cross-owner
+      # isolation and the multipart upload contract.
+      - name: Integration tests
+        run: IMAGE=s3server:ci server/backend/tests/integration/run.sh
