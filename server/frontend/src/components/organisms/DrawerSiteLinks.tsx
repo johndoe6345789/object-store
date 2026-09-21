@@ -5,7 +5,7 @@ import {
   ListItemText, Typography, Box,
   OpenInNew, Home, Email,
   Storage, Archive, CloudQueue,
-} from '@metabuilder/m3';
+} from '@/ui';
 import siteLinks from '@/constants/site-links.json';
 
 /** @brief Icon name to component mapping. */

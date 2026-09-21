@@ -3,7 +3,7 @@
 import {
   TextField, Button, Stack,
   Upload, Refresh,
-} from '@metabuilder/m3';
+} from '@/ui';
 import labels from '@/constants/ui-labels.json';
 
 /** @brief Props for ObjectToolbar molecule. */

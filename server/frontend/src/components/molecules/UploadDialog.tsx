@@ -3,7 +3,7 @@
 import {
   Dialog, DialogTitle, DialogContent,
   DialogActions, TextField, Button, Stack,
-} from '@metabuilder/m3';
+} from '@/ui';
 import { useUploadForm } from '@/hooks';
 import labels from '@/constants/ui-labels.json';
 

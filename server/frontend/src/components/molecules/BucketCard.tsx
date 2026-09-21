@@ -3,7 +3,7 @@
 import {
   Card, CardContent, CardActions,
   Typography, Button, Folder, Stack,
-} from '@metabuilder/m3';
+} from '@/ui';
 import type { Bucket } from '@/types';
 import labels from '@/constants/ui-labels.json';
 

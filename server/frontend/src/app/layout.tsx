@@ -1,6 +1,6 @@
 'use client';
 
-import '@metabuilder/scss/globals.scss';
+import '@/styles/globals.scss';
 
 /** @brief Root layout with M3 design tokens. */
 export default function RootLayout({

@@ -2,7 +2,7 @@
 
 import {
   Grid, Typography,
-} from '@metabuilder/m3';
+} from '@/ui';
 import type { Bucket } from '@/types';
 import BucketCard from './BucketCard';
 import labels from '@/constants/ui-labels.json';
