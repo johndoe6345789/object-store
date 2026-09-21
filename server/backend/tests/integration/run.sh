@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# End-to-end check of auth, cross-owner isolation and multipart upload against
-# a real server + postgres, both in throwaway containers on a private network.
+# End-to-end check of SigV4 auth, cross-owner isolation and multipart upload
+# against a real server + postgres, both in throwaway containers on a private
+# network. Requests are signed by curl (--aws-sigv4, curl >= 7.75).
 #
 #   docker build -t s3server:test -f backend/Dockerfile server   (from repo root)
 #   IMAGE=s3server:test server/backend/tests/integration/run.sh
@@ -37,9 +38,11 @@ INSERT INTO api_keys (access_key, secret_key, owner, permissions) VALUES
 SQL
 
 # req <access:secret|-> METHOD PATH [curl args...]  -> sets CODE, body in $WORK/out
+# Every request is SigV4-signed by curl itself (path-style, us-east-1).
+SIGV4="aws:amz:us-east-1:s3"
 req() {
   local cred=$1 m=$2 p=$3; shift 3
-  local auth=(); [ "$cred" != "-" ] && auth=(-H "Authorization: AWS $cred")
+  local auth=(); [ "$cred" != "-" ] && auth=(--aws-sigv4 "$SIGV4" --user "$cred")
   if [ "$m" = HEAD ]; then
     CODE=$(curl -s -o /dev/null -I -D "$WORK/hdr" -w '%{http_code}' "${auth[@]}" "$URL$p")
   else
@@ -55,15 +58,29 @@ uid() { grep -o '<UploadId>[0-9a-f]*' "$WORK/out" | sed 's/<UploadId>//'; }
 partdirs() { docker exec $ID-srv sh -c 'ls /data/s3/.uploads 2>/dev/null | wc -l'; }
 blobs() { docker exec $ID-srv sh -c "ls /data/s3/blobs/$1 2>/dev/null | wc -l"; }
 
-echo "auth"
+echo "auth (SigV4 only)"
 req - GET /health; ok "health is open" 200
 req - GET /; ok "no credentials" 403
+yes "anonymous is AccessDenied" 'grep -q "<Code>AccessDenied</Code>" "$WORK/out"'
 req x:y GET /; ok "unknown key" 403; cp "$WORK/out" "$WORK/unknown"
+yes "unknown key is InvalidAccessKeyId" 'grep -q "<Code>InvalidAccessKeyId</Code>" "$WORK/out"'
 req alice:wrong GET /; ok "wrong secret" 403
-yes "unknown key and wrong secret answer identically" 'cmp -s "$WORK/unknown" "$WORK/out"'
+yes "wrong secret is SignatureDoesNotMatch" 'grep -q "<Code>SignatureDoesNotMatch</Code>" "$WORK/out"'
 yes "no secret echoed in errors" '! grep -q "s-alice\|wrong" "$WORK/out"'
+yes "errors are S3 XML with a RequestId" 'grep -q "<Error><Code>.*</Code><Message>.*</Message>.*<RequestId>[0-9A-F]\{16\}</RequestId>" "$WORK/out"'
+yes "x-amz-request-id on every response" 'grep -qi "^x-amz-request-id: [0-9A-F]\{16\}" "$WORK/hdr"'
 req "$SNEAKY" GET /; ok "'readonly' token does not grant read" 403
 req "$ARO" PUT /ab-ro; ok "read-only key cannot create bucket" 403
+CODE=$(curl -s -o "$WORK/out" -w '%{http_code}' -H "Authorization: AWS alice:s-alice" "$URL/")
+ok "legacy 'AWS access:secret' header is refused" 403
+yes "legacy header: AuthorizationHeaderMalformed" 'grep -q "AuthorizationHeaderMalformed" "$WORK/out"'
+CODE=$(curl -s -o "$WORK/out" -w '%{http_code}' -H "Authorization: Bearer abc" "$URL/"); ok "other schemes refused" 403
+CODE=$(curl -s -o "$WORK/out" -w '%{http_code}' --aws-sigv4 "aws:amz:eu-west-2:s3" --user alice:s-alice "$URL/")
+ok "wrong signing region" 400
+yes "wrong region: AuthorizationHeaderMalformed" 'grep -q "AuthorizationHeaderMalformed" "$WORK/out"'
+CODE=$(curl -s -o "$WORK/out" -w '%{http_code}' --aws-sigv4 "aws:amz:us-east-1:s3" --user alice:s-alice -H "x-amz-date: 20200101T000000Z" "$URL/")
+ok "skewed clock" 403
+yes "skewed clock: RequestTimeTooSkewed" 'grep -q "RequestTimeTooSkewed" "$WORK/out"'
 
 echo "buckets and cross-owner isolation"
 req $A PUT /ab; ok "alice creates ab" 200
@@ -128,12 +145,19 @@ req $A POST "/ab/big.bin?uploadId=$UP" -d '<CompleteMultipartUpload><Part><PartN
 req $A POST "/ab/big.bin?uploadId=$UP" -d '<CompleteMultipartUpload><Part><PartNumber>9</PartNumber></Part></CompleteMultipartUpload>'; ok "missing part" 400
 req $A POST "/ab/big.bin?uploadId=$UP" -d '<CompleteMultipartUpload><Part><PartNumber>1</PartNumber></Part><Part><PartNumber>2</PartNumber></Part></CompleteMultipartUpload>'; ok "complete" 200
 WANT=$(md5sum < "$WORK/whole" | cut -d' ' -f1)
-yes "complete returns md5 of whole object" 'grep -q "$WANT" "$WORK/out" && grep -qi "etag: \"$WANT\"" "$WORK/hdr"'
+MPETAG=$(python3 - "$WORK/p1" "$WORK/p2" <<'PY'
+import hashlib, sys
+d = b"".join(hashlib.md5(open(f, "rb").read()).digest() for f in sys.argv[1:])
+print(hashlib.md5(d).hexdigest() + "-2")
+PY
+)
+yes "complete returns S3's md5-of-md5s-N ETag" 'grep -q "$MPETAG" "$WORK/out" && grep -qi "etag: \"$MPETAG\"" "$WORK/hdr"'
 yes "part dir removed" '[ "$(partdirs)" = 0 ]'
 req $A GET /ab/big.bin; ok "GET assembled" 200
 yes "GET bytes equal the parts concatenated" 'cmp -s "$WORK/out" "$WORK/whole"'
 yes "content type kept from initiate" 'grep -qi "content-type: application/x-test" "$WORK/hdr"'
 req $A HEAD /ab/big.bin; ok "HEAD assembled" 200
+req $A GET /ab; yes "listing shows the multipart ETag" 'grep -q "&quot;$MPETAG&quot;" "$WORK/out"'
 req $A POST "/ab/big.bin?uploadId=$UP"; ok "completed id is gone" 404
 req $B GET /ab/big.bin; ok "bob cannot read assembled object" 404
 req $A POST "/ab/nest/ed/m.bin?uploads"; ok "initiate, key with slashes" 200; UPN=$(uid)
@@ -164,11 +188,56 @@ for n in 1 2; do req $A PUT "/ab/cap.bin?partNumber=$n&uploadId=$UP4" --data-bin
 ok "parts summing past the cap" 413
 
 echo "bucket lifecycle"
+req $A DELETE /ab; ok "a bucket that still holds objects is not deleted" 409
+yes "BucketNotEmpty" 'grep -q "<Code>BucketNotEmpty</Code>" "$WORK/out"'
+req $A GET /ab
+OBJS=$(grep -o '<Key>[^<]*</Key>' "$WORK/out" | sed 's|.*|<Object>&</Object>|' | tr -d '\n')
+req $A POST "/ab?delete" -d "<Delete>$OBJS</Delete>"; ok "DeleteObjects empties it" 200
+yes "DeleteObjects reports the keys" 'grep -q "<Deleted><Key>k2</Key></Deleted>" "$WORK/out"'
+req $A GET /ab; yes "bucket is empty" '! grep -q "<Key>" "$WORK/out"'
 req $A DELETE /ab; ok "alice deletes bucket" 204
 yes "its blobs are gone" '[ "$(blobs ab)" = 0 ]'
 req $B PUT /ab; ok "bob can now take the name" 200
 req $B GET /ab/k2; ok "no data carried over to the new owner" 404
 req $B GET /ab; yes "new bucket is empty" '! grep -q "<Key>" "$WORK/out"'
+
+echo "secret encryption at rest (S3_SECRET_ENCRYPTION_KEY)"
+KEY=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
+start_srv() { # start_srv <name> [extra docker args...]
+  local n=$1; shift
+  docker run -d --name $ID-$n --network $ID -p 127.0.0.1::9000 \
+    -e PGHOST=pg -e PGUSER=s3 -e PGPASSWORD=it -e PGDATABASE=s3 \
+    -e S3_DB_CONN="host=pg port=5432 dbname=s3 user=s3 password=it" "$@" "$IMAGE" >/dev/null || return 1
+  URL="http://127.0.0.1:$(docker port $ID-$n 9000/tcp | head -1 | sed 's/.*://')"
+  for _ in $(seq 60); do curl -sf "$URL/health" >/dev/null 2>&1 && return 0; sleep 1; done
+  return 1
+}
+URL1=$URL
+yes "server starts with a master key" 'start_srv srv2 -e S3_SECRET_ENCRYPTION_KEY=$KEY'
+yes "start log says so" 'docker logs $ID-srv2 2>&1 | grep -q "encrypted at rest"'
+req $A GET /; ok "encrypted key still authenticates (first use encrypts it)" 200
+yes "alice's row is encrypted" '[ "$(psql -tA -c "select count(*) from api_keys where access_key=\$\$alice\$\$ and secret_key=\$\$!enc\$\$ and secret_enc is not null")" = 1 ]'
+yes "no plaintext copy of the secret remains" '[ "$(psql -tA -c "select count(*) from api_keys where secret_key like \$\$s-alice%\$\$ or secret_enc like \$\$%s-alice%\$\$")" = 0 ]'
+req alice:wrong GET /; ok "wrong secret still refused" 403
+req $A GET /; ok "second request uses the ciphertext" 200
+psql -c "UPDATE api_keys SET secret_key='s-alice-rotated' WHERE access_key='alice'"
+req alice:s-alice-rotated GET /; ok "rotation: a new plaintext secret wins" 200
+req $A GET /; ok "rotation: the old secret stops working" 403
+yes "rotated secret is encrypted again" '[ "$(psql -tA -c "select secret_key from api_keys where access_key=\$\$alice\$\$")" = "!enc" ]'
+psql -c "UPDATE api_keys SET secret_key='s-alice' WHERE access_key='alice'"
+docker rm -f $ID-srv2 >/dev/null
+yes "server without the key starts (plaintext mode) with a warning" 'start_srv srv3'
+yes "warning is logged" 'docker logs $ID-srv3 2>&1 | grep -q "WARNING: S3_SECRET_ENCRYPTION_KEY is not set"'
+req $A GET /; ok "plaintext row works without a master key" 200
+psql -c "UPDATE api_keys SET secret_key='!enc', secret_enc='AAAA' WHERE access_key='alice'"
+req $A GET /; ok "encrypted row without a master key fails closed" 500
+docker rm -f $ID-srv3 >/dev/null
+start_srv srv4 -e S3_SECRET_ENCRYPTION_KEY=$KEY >/dev/null
+req $A GET /; ok "undecryptable blob fails closed" 500
+psql -c "UPDATE api_keys SET secret_key='s-alice', secret_enc=NULL WHERE access_key='alice'"
+req $A GET /; ok "restored" 200
+docker rm -f $ID-srv4 >/dev/null
+URL=$URL1
 
 echo
 if [ $FAILS = 0 ]; then echo "all integration checks passed"; else echo "$FAILS check(s) FAILED"; docker logs $ID-srv 2>&1 | tail -20; exit 1; fi

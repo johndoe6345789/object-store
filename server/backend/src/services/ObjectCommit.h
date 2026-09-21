@@ -33,20 +33,48 @@ inline std::mutex& blobCommitMutex()
 inline std::string commitObject(int bucketId, const std::string& bucket,
                                 const std::string& key,
                                 const std::string& contentType,
-                                BlobStore::Staged& staged)
+                                BlobStore::Staged& staged,
+                                const std::string& metadataJson = "{}",
+                                const std::string& objectEtag = "")
 {
     std::lock_guard<std::mutex> lock(blobCommitMutex());
-    const auto etag = staged.etag;
+    // The blob is named by its content md5 (staged.etag); the object's own
+    // ETag differs only for multipart objects (md5-of-md5s-N).
+    const auto etag = objectEtag.empty() ? staged.etag : objectEtag;
     const auto size = static_cast<int64_t>(staged.size);
     auto previous = ObjectStore::get(bucketId, key);
     auto rel = Globals::blobs->publish(bucket, staged);
-    ObjectStore::put(bucketId, key, etag, size, contentType, rel);
+    ObjectStore::put(bucketId, key, etag, size, contentType, rel, metadataJson);
     if (!previous.isNull()) {
         auto old = previous["storage_path"].asString();
         if (old != rel && !ObjectStore::pathInUse(old))
             Globals::blobs->remove(old);
     }
     return etag;
+}
+
+/// @brief Point `key` at a blob that already exists in the same bucket (a
+///        same-bucket CopyObject: no bytes move). Fails (false) if the source
+///        blob is gone. Same locking as commitObject().
+inline bool commitReference(int bucketId, const std::string& key,
+                            const std::string& etag, int64_t size,
+                            const std::string& contentType,
+                            const std::string& storagePath,
+                            const std::string& metadataJson)
+{
+    std::lock_guard<std::mutex> lock(blobCommitMutex());
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(Globals::blobs->fullPath(storagePath), ec))
+        return false;
+    auto previous = ObjectStore::get(bucketId, key);
+    ObjectStore::put(bucketId, key, etag, size, contentType, storagePath,
+                     metadataJson);
+    if (!previous.isNull()) {
+        auto old = previous["storage_path"].asString();
+        if (old != storagePath && !ObjectStore::pathInUse(old))
+            Globals::blobs->remove(old);
+    }
+    return true;
 }
 
 /// @brief Delete an object row and, if unreferenced, its blob.

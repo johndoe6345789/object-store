@@ -12,17 +12,19 @@ namespace s3
 
 std::vector<Json::Value>
 ObjectStore::list(int bucketId, const std::string& prefix, int maxKeys,
-                  const std::string& startAfter)
+                  const std::string& startAfter, bool inclusive)
 {
     // Parameter numbering shifts with the optional clauses, so it is built up
     // rather than written out, and the values are bound in the same order.
-    std::string sql = "SELECT * FROM objects WHERE bucket_id=$1";
+    std::string sql = std::string("SELECT ") + ObjectStoreUtil::kCols +
+                      " FROM objects WHERE bucket_id=$1";
     int n = 1;
     if (!prefix.empty())
         sql += " AND key LIKE $" + std::to_string(++n) + " ESCAPE '\\'";
     if (!startAfter.empty())
-        sql += " AND key > $" + std::to_string(++n);
-    sql += " ORDER BY key LIMIT " + std::to_string(maxKeys);
+        sql += std::string(" AND key COLLATE \"C\" ") + (inclusive ? ">=" : ">") + " $" + std::to_string(++n) + "::text";
+    // Byte order, like S3, whatever collation the database was created with.
+    sql += " ORDER BY key COLLATE \"C\" LIMIT " + std::to_string(maxKeys);
 
     drogon::orm::Result r = [&] {
         if (!prefix.empty() && !startAfter.empty())

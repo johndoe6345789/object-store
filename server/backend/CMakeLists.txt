@@ -8,17 +8,30 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 find_package(Drogon REQUIRED)
 find_package(OpenSSL REQUIRED)
 
+# SigV4: canonicalisation, verification, aws-chunked decoding, payload checks.
+set(S3_SIGV4_SOURCES
+    src/sigv4/Canonical.cpp
+    src/sigv4/SigV4Verify.cpp
+    src/sigv4/PresignedAuth.cpp
+    src/sigv4/ChunkedDecoder.cpp
+    src/sigv4/PayloadReader.cpp
+)
+
 add_executable(s3server
     src/main.cpp
-    src/controllers/BucketCtrl.cpp
-    src/controllers/ObjectCtrl.cpp
-    src/controllers/ObjectMutCtrl.cpp
-    src/controllers/MultipartCtrl.cpp
-    src/controllers/ListCtrl.cpp
-    src/controllers/HealthCtrl.cpp
+    src/controllers/S3Router.cpp
+    src/controllers/BucketOps.cpp
+    src/controllers/ListOps.cpp
+    src/controllers/ObjectGet.cpp
+    src/controllers/ObjectPut.cpp
+    src/controllers/MultipartOps.cpp
+    src/controllers/MultipartList.cpp
     src/filters/AuthFilter.cpp
     src/services/BucketStore.cpp
     src/services/ObjectStoreList.cpp
+    src/services/KeyStore.cpp
+    src/services/SecretCrypto.cpp
+    ${S3_SIGV4_SOURCES}
 )
 
 target_include_directories(s3server
@@ -48,6 +61,11 @@ add_executable(s3tests EXCLUDE_FROM_ALL
     tests/auth_util_test.cpp
     tests/name_util_test.cpp
     tests/multipart_test.cpp
+    tests/sigv4_test.cpp
+    tests/chunked_decoder_test.cpp
+    tests/s3_misc_test.cpp
+    src/services/SecretCrypto.cpp
+    ${S3_SIGV4_SOURCES}
 )
 
 target_include_directories(s3tests

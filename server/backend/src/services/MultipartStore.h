@@ -15,7 +15,11 @@
 
 #include <json/json.h>
 
+#include <sys/stat.h>
+
 #include <algorithm>
+#include <ctime>
+#include <tuple>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -38,10 +42,13 @@ class MultipartStore
 
     struct Meta {
         std::string owner, bucket, key, contentType;
+        std::string metadata = "{}"; ///< JSON: system + x-amz-meta-* headers
+        long long initiated = 0;     ///< epoch seconds
     };
     struct Part {
         int number;
         uintmax_t size;
+        long long mtime = 0; ///< epoch seconds
     };
     /// Outcome of planning a completion: `error` is an S3 error code, empty
     /// on success.
@@ -102,6 +109,9 @@ class MultipartStore
         j["bucket"] = m.bucket;
         j["key"] = m.key;
         j["contentType"] = m.contentType;
+        j["metadata"] = m.metadata;
+        j["initiated"] = static_cast<Json::Int64>(
+            m.initiated ? m.initiated : ::time(nullptr));
         auto tmp = dir / "meta.tmp";
         {
             std::ofstream f(tmp, std::ios::binary);
@@ -122,8 +132,12 @@ class MultipartStore
         Json::Value j;
         if (!Json::Reader().parse(f, j) || !j.isObject())
             return std::nullopt;
-        return Meta{j["owner"].asString(), j["bucket"].asString(),
-                    j["key"].asString(), j["contentType"].asString()};
+        Meta m{j["owner"].asString(), j["bucket"].asString(),
+               j["key"].asString(), j["contentType"].asString()};
+        if (j["metadata"].isString())
+            m.metadata = j["metadata"].asString();
+        m.initiated = j["initiated"].asInt64();
+        return m;
     }
 
     /// @brief Total bytes of the parts already stored, excluding part `skip`.
@@ -163,7 +177,51 @@ class MultipartStore
             }
         }
         fs::rename(tmp, dir / std::to_string(n));
-        return {"", md5.hex()};
+        auto etag = md5.hex();
+        // Sidecar so Complete/ListParts need not re-read the part; ignored by
+        // listParts (its name is not a bare part number).
+        std::ofstream(dir / (std::to_string(n) + ".etag")) << etag;
+        return {"", etag};
+    }
+
+    /// @brief md5 hex of a stored part (sidecar, else computed).
+    std::string partEtag(const std::string& id, int n) const
+    {
+        std::ifstream f(root_ / id / (std::to_string(n) + ".etag"));
+        std::string e;
+        if (f && std::getline(f, e) && e.size() == 32)
+            return e;
+        std::ifstream in(root_ / id / std::to_string(n), std::ios::binary);
+        Md5 md5;
+        std::vector<char> buf(1 << 20);
+        while (in) {
+            in.read(buf.data(), (std::streamsize)buf.size());
+            if (auto got = static_cast<size_t>(in.gcount()))
+                md5.update({buf.data(), got});
+        }
+        return md5.hex();
+    }
+
+    /// @brief Uploads of (owner, bucket), ordered by (key, id).
+    std::vector<std::pair<std::string, Meta>>
+    listUploads(const std::string& owner, const std::string& bucket) const
+    {
+        std::vector<std::pair<std::string, Meta>> out;
+        std::error_code ec;
+        for (fs::directory_iterator it(root_, ec), end; !ec && it != end;
+             it.increment(ec)) {
+            auto id = it->path().filename().string();
+            if (!isValidUploadId(id))
+                continue;
+            auto m = load(id);
+            if (m && m->owner == owner && m->bucket == bucket)
+                out.emplace_back(id, *m);
+        }
+        std::sort(out.begin(), out.end(), [](auto& a, auto& b) {
+            return std::tie(a.second.key, a.first) <
+                   std::tie(b.second.key, b.first);
+        });
+        return out;
     }
 
     /// @brief Stored parts in ascending order (temp and meta files ignored).
@@ -177,8 +235,12 @@ class MultipartStore
              it.increment(ec)) {
             auto name = it->path().filename().string();
             auto n = parsePartNumber(name);
-            if (n && std::to_string(*n) == name && it->is_regular_file())
-                out.push_back({*n, it->file_size()});
+            if (n && std::to_string(*n) == name && it->is_regular_file()) {
+                struct stat st {};
+                ::stat(it->path().c_str(), &st);
+                out.push_back({*n, it->file_size(),
+                               static_cast<long long>(st.st_mtime)});
+            }
         }
         std::sort(out.begin(), out.end(),
                   [](auto& a, auto& b) { return a.number < b.number; });

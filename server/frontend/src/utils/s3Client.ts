@@ -25,13 +25,16 @@ export function clearCredentials(): void {
   currentCredentials = null;
 }
 
-/** @brief Build auth headers for S3 API. */
+/**
+ * @brief Build credential headers for the same-origin proxy, which signs
+ * the upstream request with SigV4. Never put these in URLs or storage.
+ */
 function authHeaders(): HeadersInit {
   const creds = getCredentials();
   if (!creds) return {};
   return {
-    Authorization:
-      `AWS ${creds.accessKey}:${creds.secretKey}`,
+    'x-s3-access-key': creds.accessKey,
+    'x-s3-secret-key': creds.secretKey,
   };
 }
 
