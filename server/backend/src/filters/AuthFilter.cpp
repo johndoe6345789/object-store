@@ -4,6 +4,7 @@
  */
 
 #include "AuthFilter.h"
+#include "../services/AuthUtil.h"
 #include "../services/DbPool.h"
 #include "../services/OffLoop.h"
 #include "../services/S3Response.h"
@@ -16,8 +17,8 @@ namespace s3
 void AuthFilter::doFilter(const HttpRequestPtr& req, FilterCallback&& cb,
                           FilterChainCallback&& ccb)
 {
-    auto auth = req->getHeader("Authorization");
-    if (auth.empty()) {
+    const auto& auth = req->getHeader("Authorization");
+    if (auth.empty() || auth.size() > 1024) {
         auto r = s3Error(k403Forbidden, "AccessDenied",
                           "Access denied");
         cb(r);
@@ -59,17 +60,25 @@ void AuthFilter::doFilter(const HttpRequestPtr& req, FilterCallback&& cb,
                 DbPool::get()->execSqlSync("SELECT access_key, secret_key, owner, permissions "
                                            "FROM api_keys WHERE access_key=$1",
                                            key);
-            if (rows.empty() || rows[0]["secret_key"].as<std::string>() != suppliedSecret) {
+            // One response, one code path for "no such key" and "wrong
+            // secret": the caller learns nothing about which access keys
+            // exist. A missing key still runs a comparison so the two cases
+            // take the same time.
+            const std::string stored =
+                rows.empty() ? std::string(suppliedSecret.size(), '\0')
+                             : rows[0]["secret_key"].as<std::string>();
+            const bool secretOk = constantTimeEquals(stored, suppliedSecret);
+            if (rows.empty() || !secretOk) {
                 auto r = s3Error(k403Forbidden, "InvalidAccessKeyId",
-                              "The access key id you provided does not exist");
+                                 "The access key id or secret you provided "
+                                 "is not valid");
                 cb(r);
                 return;
             }
+            // Exact tokens: "readonly" must not satisfy "read".
             const auto permissions = rows[0]["permissions"].as<std::string>();
             const bool isRead = req->getMethod() == Get || req->getMethod() == Head;
-            const auto required = isRead ? "read" : "write";
-            if (permissions.find(required) == std::string::npos &&
-                permissions.find("admin") == std::string::npos) {
+            if (!isAllowed(permissions, isRead)) {
                 auto r = s3Error(k403Forbidden, "AccessDenied",
                               "Access denied");
                 cb(r);

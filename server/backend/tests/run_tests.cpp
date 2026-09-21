@@ -5,10 +5,16 @@
 
 int s3ResponseTest();
 int blobStoreTest();
+int authUtilTest();
+int nameUtilTest();
+int multipartTest();
 
 int main()
 {
     s3ResponseTest();
     blobStoreTest();
+    authUtilTest();
+    nameUtilTest();
+    multipartTest();
     return 0;
 }

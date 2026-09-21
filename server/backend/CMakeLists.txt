@@ -13,6 +13,7 @@ add_executable(s3server
     src/controllers/BucketCtrl.cpp
     src/controllers/ObjectCtrl.cpp
     src/controllers/ObjectMutCtrl.cpp
+    src/controllers/MultipartCtrl.cpp
     src/controllers/ListCtrl.cpp
     src/controllers/HealthCtrl.cpp
     src/filters/AuthFilter.cpp
@@ -44,6 +45,9 @@ add_executable(s3tests EXCLUDE_FROM_ALL
     tests/run_tests.cpp
     tests/s3_response_test.cpp
     tests/blob_store_test.cpp
+    tests/auth_util_test.cpp
+    tests/name_util_test.cpp
+    tests/multipart_test.cpp
 )
 
 target_include_directories(s3tests
@@ -56,5 +60,9 @@ target_link_libraries(s3tests
         OpenSSL::SSL
         OpenSSL::Crypto
 )
+
+# The tests are plain assert()s, and Release defines NDEBUG, which turns every
+# assert into nothing -- the tests would "pass" while checking nothing.
+target_compile_options(s3tests PRIVATE -UNDEBUG)
 
 add_test(NAME s3tests COMMAND s3tests)
